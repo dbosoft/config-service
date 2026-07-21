@@ -31,6 +31,10 @@ public sealed class KestrelColonKeyTests : IAsyncLifetime
     private readonly string _dataDirectory =
         Path.Combine(Path.GetTempPath(), "configservice-kestrel-" + Guid.NewGuid().ToString("N"));
 
+    // Mirrors the cap the Host sets in Program.cs. Small enough that a test
+    // can comfortably exceed it.
+    private const long MaxBodyBytes = 1 * 1024 * 1024; // 1 MiB
+
     private WebApplication _app = null!;
     private Uri _baseAddress = null!;
 
@@ -38,6 +42,7 @@ public sealed class KestrelColonKeyTests : IAsyncLifetime
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0"); // dynamic free port
+        builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = MaxBodyBytes);
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ConfigService:DataDirectory"] = _dataDirectory,
@@ -98,6 +103,26 @@ public sealed class KestrelColonKeyTests : IAsyncLifetime
         get.StatusCode.Should().Be(HttpStatusCode.OK);
         var dto = await get.Content.ReadFromJsonAsync<KeyValueWireItem>();
         dto!.Value.Should().Be("EntraId");
+    }
+
+    [Fact]
+    public async Task Oversized_body_is_rejected_before_the_auth_handler_buffers_it()
+    {
+        using var client = new HttpClient(new HmacClientHandler(AdminId, AdminSecret, new HttpClientHandler()))
+        {
+            BaseAddress = _baseAddress,
+        };
+
+        // A value comfortably larger than the 1 MiB cap. This must be rejected
+        // by Kestrel as the body is read (413) rather than buffered whole into
+        // memory by the auth handler's ReadBodyAsync. Only a real socket
+        // enforces this — TestServer ignores Kestrel limits entirely.
+        var huge = new string('x', (int)MaxBodyBytes + 1024);
+        var resp = await client.PutAsJsonAsync(
+            "/admin/kv",
+            new AdminPutKeyValueRequest { Key = "too-big", Value = huge });
+
+        resp.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
     }
 
     private sealed class KeyValueWireItem

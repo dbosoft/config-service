@@ -59,4 +59,34 @@ public class KeyValueFilterTests
     [InlineData("rate\\*", "rateLimit", false)]
     public void Matches_honours_escapes_of_reserved_characters(string filter, string value, bool expected)
         => KeyValueFilter.Matches(value, filter).Should().Be(expected);
+
+    [Theory]
+    // A bare "*" as one alternative in an OR list means match-all.
+    [InlineData("a,*", "anything", true)]
+    [InlineData("a,*", "a", true)]
+    public void Matches_star_alternative_in_or_list_matches_all(string filter, string value, bool expected)
+        => KeyValueFilter.Matches(value, filter).Should().Be(expected);
+
+    [Theory]
+    // Empty alternatives (leading / trailing / doubled / lone comma) match
+    // nothing — they must never broaden the result set, and in particular an
+    // empty alternative must not match the empty string an unlabeled entry is
+    // coerced to. This is the "label=,prod must not include unlabeled" fix.
+    [InlineData(",prod", "", false)]
+    [InlineData(",prod", "prod", true)]
+    [InlineData("prod,", "", false)]
+    [InlineData("a,,b", "", false)]
+    [InlineData(",", "", false)]
+    [InlineData("", "", false)]
+    [InlineData("", "anything", false)]
+    public void Matches_empty_alternatives_match_nothing(string filter, string value, bool expected)
+        => KeyValueFilter.Matches(value, filter).Should().Be(expected);
+
+    [Theory]
+    // A lone trailing backslash is preserved as a literal backslash (it is
+    // not an escape because nothing follows it).
+    [InlineData("abc\\", "abc\\", true)]
+    [InlineData("abc\\", "abc", false)]
+    public void Matches_trailing_lone_backslash_is_literal(string filter, string value, bool expected)
+        => KeyValueFilter.Matches(value, filter).Should().Be(expected);
 }

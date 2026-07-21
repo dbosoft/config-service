@@ -54,7 +54,7 @@ public sealed class HmacSha256AuthenticationHandler : AuthenticationHandler<Hmac
         var parameters = HmacSignature.ParseAuthorizationParameters(authHeader[prefix.Length..]);
         if (parameters == null)
         {
-            return Fail("Malformed Authorization header.");
+            return Fail("Malformed Authorization header.", LogLevel.Information);
         }
 
         var signedHeaderNames = parameters.SignedHeaders.Split(';', StringSplitOptions.RemoveEmptyEntries);
@@ -63,17 +63,17 @@ public sealed class HmacSha256AuthenticationHandler : AuthenticationHandler<Hmac
         // x-ms-date or Date — the Microsoft Azure SDK uses Date by default).
         if (!signedHeaderNames.Contains("host", StringComparer.OrdinalIgnoreCase))
         {
-            return Fail("SignedHeaders missing 'host'.");
+            return Fail("SignedHeaders missing 'host'.", LogLevel.Information);
         }
         if (!signedHeaderNames.Contains("x-ms-content-sha256", StringComparer.OrdinalIgnoreCase))
         {
-            return Fail("SignedHeaders missing 'x-ms-content-sha256'.");
+            return Fail("SignedHeaders missing 'x-ms-content-sha256'.", LogLevel.Information);
         }
         var hasXmsDate = signedHeaderNames.Contains("x-ms-date", StringComparer.OrdinalIgnoreCase);
         var hasDate = signedHeaderNames.Contains("date", StringComparer.OrdinalIgnoreCase);
         if (!hasXmsDate && !hasDate)
         {
-            return Fail("SignedHeaders missing date header (expected 'x-ms-date' or 'date').");
+            return Fail("SignedHeaders missing date header (expected 'x-ms-date' or 'date').", LogLevel.Information);
         }
 
         // Date validation. x-ms-date takes precedence over Date per spec.
@@ -83,7 +83,7 @@ public sealed class HmacSha256AuthenticationHandler : AuthenticationHandler<Hmac
 
         if (string.IsNullOrEmpty(dateString))
         {
-            return Fail("Missing date header.");
+            return Fail("Missing date header.", LogLevel.Information);
         }
 
         if (!DateTimeOffset.TryParse(
@@ -92,18 +92,18 @@ public sealed class HmacSha256AuthenticationHandler : AuthenticationHandler<Hmac
                 DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
                 out var requestDate))
         {
-            return Fail("Invalid date header.");
+            return Fail("Invalid date header.", LogLevel.Information);
         }
 
         if ((DateTimeOffset.UtcNow - requestDate).Duration() > Options.MaxClockSkew)
         {
-            return Fail("Date header outside allowed clock skew.");
+            return Fail("Date header outside allowed clock skew.", LogLevel.Information);
         }
 
         // Body hash. Buffer so the downstream pipeline can re-read.
         if (!Request.Headers.TryGetValue("x-ms-content-sha256", out var clientHashValues))
         {
-            return Fail("Missing x-ms-content-sha256 header.");
+            return Fail("Missing x-ms-content-sha256 header.", LogLevel.Information);
         }
 
         var clientHash = clientHashValues.ToString();
@@ -112,7 +112,7 @@ public sealed class HmacSha256AuthenticationHandler : AuthenticationHandler<Hmac
         var actualHash = HmacSignature.ComputeContentHash(bodyBytes);
         if (!HmacSignature.SignaturesEqual(actualHash, clientHash))
         {
-            return Fail("Body hash does not match x-ms-content-sha256 header.");
+            return Fail("Body hash does not match x-ms-content-sha256 header.", LogLevel.Information);
         }
 
         var credential = await _credentials.GetByIdAsync(parameters.CredentialId, Context.RequestAborted)
@@ -133,7 +133,7 @@ public sealed class HmacSha256AuthenticationHandler : AuthenticationHandler<Hmac
             }
             else
             {
-                return Fail($"Signed header '{name}' missing from request.");
+                return Fail($"Signed header '{name}' missing from request.", LogLevel.Information);
             }
 
             headerValues.Add(value ?? "");
@@ -164,10 +164,11 @@ public sealed class HmacSha256AuthenticationHandler : AuthenticationHandler<Hmac
         {
             expectedSignature = HmacSignature.ComputeSignature(stringToSign, secretBase64);
         }
-        catch (FormatException)
+        catch (Exception ex) when (ex is FormatException or ArgumentNullException)
         {
-            // Stored secret is not valid base64. Still spend comparable work so
-            // this looks identical to any other failure from the outside.
+            // Stored secret is missing or not valid base64. Still spend
+            // comparable work so this looks identical to any other failure
+            // from the outside.
             expectedSignature = HmacSignature.ComputeSignature(stringToSign, DummySecretBase64);
             credentialUsable = false;
         }
@@ -195,12 +196,16 @@ public sealed class HmacSha256AuthenticationHandler : AuthenticationHandler<Hmac
         return AuthenticateResult.Success(ticket);
     }
 
-    private AuthenticateResult Fail(string reason)
+    private AuthenticateResult Fail(string reason, LogLevel level = LogLevel.Warning)
     {
         // Log the specific reason for operators (this is the only place a
-        // failed authentication is recorded, which helps detect scanning and
-        // brute-force probing) but never surface it to the caller.
-        Logger.LogWarning(
+        // failed authentication is recorded) but never surface it to the
+        // caller. Routine malformed/stale requests are logged at Information;
+        // Warning is reserved for the security-relevant credential and
+        // signature failures so a flood of the former can't drown out the
+        // signal that someone is probing credentials or forging signatures.
+        Logger.Log(
+            level,
             "HMAC authentication failed: {Reason} (remoteIp={RemoteIp})",
             reason,
             Context.Connection.RemoteIpAddress?.ToString() ?? "unknown");

@@ -4,7 +4,9 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AwesomeAssertions;
+using Dbosoft.ConfigService.Authentication;
 using Dbosoft.ConfigService.Endpoints;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -121,6 +123,28 @@ public class NegativeAuthTests : IClassFixture<NegativeAuthTests.SeededFactory>
     }
 
     [Fact]
+    public async Task Unknown_credential_and_bad_signature_responses_are_indistinguishable()
+    {
+        // Unknown credential id, otherwise well-formed request.
+        var unknownReq = new HttpRequestMessage(HttpMethod.Get, Abs("/kv"));
+        Sign(unknownReq, "no-such-credential", _factory.AdminSecret);
+        var unknown = await _factory.CreateClient().SendAsync(unknownReq);
+
+        // Known credential id, deliberately wrong signature.
+        var badSigReq = new HttpRequestMessage(HttpMethod.Get, Abs("/kv"));
+        Sign(badSigReq, _factory.AdminId, _factory.AdminSecret, signatureOverride: "not-the-real-signature");
+        var badSig = await _factory.CreateClient().SendAsync(badSigReq);
+
+        // The whole point of the oracle fix: an attacker must not be able to
+        // tell "that credential exists but I signed wrong" from "no such
+        // credential". Status and challenge header must match, and neither may
+        // carry a distinguishing body.
+        badSig.StatusCode.Should().Be(unknown.StatusCode);
+        badSig.Headers.WwwAuthenticate.ToString().Should().Be(unknown.Headers.WwwAuthenticate.ToString());
+        (await badSig.Content.ReadAsStringAsync()).Should().Be(await unknown.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task Reader_credential_may_read_but_not_write()
     {
         var reader = _factory.CreateSignedClient(_factory.ReaderId, _factory.ReaderSecret);
@@ -208,20 +232,38 @@ public class NegativeAuthTests : IClassFixture<NegativeAuthTests.SeededFactory>
         {
             Directory.CreateDirectory(_dataDirectory);
             var now = DateTimeOffset.UtcNow;
-            var doc = new
+
+            // Seed real Credential objects serialized with the same options the
+            // store uses to read them (camelCase + string enums), so the
+            // fixture tracks the production wire shape instead of relying on a
+            // hand-rolled JSON layout that happens to match.
+            var doc = new StoreFileShape
             {
-                version = 1,
-                credentials = new object[]
+                Credentials =
                 {
-                    new { id = AdminId, secretBase64 = AdminSecret, role = "Admin", createdAt = now },
-                    new { id = ReaderId, secretBase64 = ReaderSecret, role = "Reader", createdAt = now },
-                    new { id = RevokedId, secretBase64 = RevokedSecret, role = "Admin", createdAt = now, revokedAt = now.AddMinutes(-5) },
-                    new { id = ExpiredId, secretBase64 = ExpiredSecret, role = "Admin", createdAt = now, expiresAt = now.AddMinutes(-5) },
+                    new Credential { Id = AdminId, SecretBase64 = AdminSecret, Role = CredentialRole.Admin, CreatedAt = now },
+                    new Credential { Id = ReaderId, SecretBase64 = ReaderSecret, Role = CredentialRole.Reader, CreatedAt = now },
+                    new Credential { Id = RevokedId, SecretBase64 = RevokedSecret, Role = CredentialRole.Admin, CreatedAt = now, RevokedAt = now.AddMinutes(-5) },
+                    new Credential { Id = ExpiredId, SecretBase64 = ExpiredSecret, Role = CredentialRole.Admin, CreatedAt = now, ExpiresAt = now.AddMinutes(-5) },
                 },
+            };
+
+            var options = new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                Converters = { new JsonStringEnumConverter() },
             };
             File.WriteAllText(
                 Path.Combine(_dataDirectory, "credentials.json"),
-                JsonSerializer.Serialize(doc, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+                JsonSerializer.Serialize(doc, options));
+        }
+
+        /// <summary>Mirrors the store's on-disk envelope (version + list).</summary>
+        private sealed class StoreFileShape
+        {
+            public int Version { get; set; } = 1;
+            public List<Credential> Credentials { get; init; } = new();
         }
 
         public HttpClient CreateSignedClient(string id, string secret)
