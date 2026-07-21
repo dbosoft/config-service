@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Dbosoft.ConfigService.Host/Dbosoft.ConfigService.Host.csproj" />
+    <Project Path="src/Dbosoft.ConfigService/Dbosoft.ConfigService.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/Dbosoft.ConfigService.IntegrationTests/Dbosoft.ConfigService.IntegrationTests.csproj" />
+    <Project Path="test/Dbosoft.ConfigService.Tests/Dbosoft.ConfigService.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Dbosoft.ConfigService</PackageId>
+    <Description>Azure App Configuration data-plane protocol server with JSON file storage. Embeddable as an ASP.NET Core library or run as a standalone host.</Description>
+    <RootNamespace>Dbosoft.ConfigService</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,65 @@
+## .NET / build output
+bin/
+obj/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+[Ll]og/
+[Ll]ogs/
+
+## Publish output
+publish/
+*.publishproj
+*.pubxml
+*.pubxml.user
+PublishScripts/
+
+## NuGet
+*.nupkg
+*.snupkg
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+## MSBuild / build logs
+msbuild.log
+msbuild.err
+msbuild.wrn
+*.binlog
+
+## IDE / editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.userprefs
+*.suo
+
+## Test results & coverage
+[Tt]est[Rr]esult*/
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+coverage*.xml
+coverage*.json
+*.opencover.xml
+
+## Tooling
+.dotnet/
+
+## OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+## Local runtime data (values.json, credentials.json, audit.jsonl, etc.)
+data/
+*.local.json

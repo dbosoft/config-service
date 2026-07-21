@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Authors>dbosoft</Authors>
+    <Company>dbosoft</Company>
+    <Product>Dbosoft Config Service</Product>
+    <Copyright>Copyright (c) dbosoft</Copyright>
+  </PropertyGroup>
+</Project>

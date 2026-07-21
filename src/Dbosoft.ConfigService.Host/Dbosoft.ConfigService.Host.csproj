@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Dbosoft.ConfigService.Host</RootNamespace>
+    <AssemblyName>Dbosoft.ConfigService.Host</AssemblyName>
+    <UserSecretsId>dbosoft-configservice-host</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Dbosoft.ConfigService\Dbosoft.ConfigService.csproj" />
+  </ItemGroup>
+
+</Project>
