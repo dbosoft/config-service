@@ -139,6 +139,56 @@ public class JsonFileKeyValueStoreTests : IDisposable
         => (await _store.DeleteAsync("missing", null)).Should().BeNull();
 
     [Fact]
+    public async Task NUL_label_is_treated_as_no_label_on_the_single_key_path()
+    {
+        await _store.SetAsync("k", null, "v", null, null);
+
+        // "\0" (the wire %00 sentinel) must address the unlabeled entry, the
+        // same as null/empty do.
+        var viaNul = await _store.GetAsync("k", "\0");
+
+        viaNul.Should().NotBeNull();
+        viaNul!.Value.Should().Be("v");
+    }
+
+    [Fact]
+    public async Task List_with_NUL_label_returns_only_unlabeled()
+    {
+        await _store.SetAsync("a", null, "1", null, null);
+        await _store.SetAsync("b", "prod", "2", null, null);
+
+        var unlabeled = await _store.ListAsync(null, "\0");
+
+        unlabeled.Should().HaveCount(1);
+        unlabeled[0].Key.Should().Be("a");
+    }
+
+    [Fact]
+    public async Task Failed_save_rolls_back_in_memory_state_so_it_matches_disk()
+    {
+        // Persist a baseline value.
+        await _store.SetAsync("k", null, "v1", null, null);
+
+        // Force the next save to fail: occupy the temp path with a directory
+        // so File.Create(values.json.tmp) throws.
+        var tmpBlocker = Path.Combine(_dataDir, "values.json.tmp");
+        Directory.CreateDirectory(tmpBlocker);
+
+        var act = async () => await _store.SetAsync("k", null, "v2", null, null);
+        await act.Should().ThrowAsync<Exception>();
+
+        // The in-memory state must have rolled back to the last persisted
+        // value rather than serving the never-persisted "v2".
+        (await _store.GetAsync("k", null))!.Value.Should().Be("v1");
+
+        // And a fresh instance reading from disk agrees — no divergence.
+        Directory.Delete(tmpBlocker);
+        var opts = Options.Create(new ConfigServiceOptions { DataDirectory = _dataDir });
+        using var fresh = new JsonFileKeyValueStore(opts);
+        (await fresh.GetAsync("k", null))!.Value.Should().Be("v1");
+    }
+
+    [Fact]
     public async Task Values_persist_across_store_instances()
     {
         await _store.SetAsync("k", null, "persistent", null, null);

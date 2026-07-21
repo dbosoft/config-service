@@ -28,6 +28,18 @@ var bootstrapRequested = !string.IsNullOrEmpty(options.BootstrapAdminId)
     && !string.IsNullOrEmpty(options.BootstrapAdminSecret);
 var storeWasEmpty = (await credentials.ListAsync()).Count == 0;
 
+// Fail fast on a non-base64 bootstrap secret. Otherwise the credential is
+// created and startup succeeds, but every request later fails to authenticate
+// (the HMAC key can't be base64-decoded) — a silent, total lockout.
+if (bootstrapRequested && storeWasEmpty && !IsBase64(options.BootstrapAdminSecret!))
+{
+    app.Logger.LogCritical(
+        "ConfigService:BootstrapAdminSecret is not valid base64. The HMAC secret must be a " +
+        "base64-encoded key (e.g. `openssl rand -base64 32`). Refusing to start.");
+    Environment.ExitCode = 78; // EX_CONFIG
+    return;
+}
+
 if (bootstrapRequested)
 {
     await credentials.EnsureBootstrapAdminAsync(
@@ -73,6 +85,13 @@ app.MapConfigService();
 app.MapHealthChecks("/health");
 
 await app.RunAsync();
+
+static bool IsBase64(string value)
+{
+    // Upper bound on decoded length; TryFromBase64String validates the format.
+    var buffer = new byte[value.Length];
+    return Convert.TryFromBase64String(value, buffer, out _);
+}
 
 /// <summary>
 /// Marker so test projects can reference <c>Program</c> for

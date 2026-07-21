@@ -76,10 +76,13 @@ public sealed class HmacSha256AuthenticationHandler : AuthenticationHandler<Hmac
             return Fail("SignedHeaders missing date header (expected 'x-ms-date' or 'date').", LogLevel.Information);
         }
 
-        // Date validation. x-ms-date takes precedence over Date per spec.
-        var dateString = Request.Headers.TryGetValue("x-ms-date", out var xms)
+        // Date validation. Validate the freshness of the date header that was
+        // actually signed (x-ms-date takes precedence when both are signed),
+        // so an intermediary injecting an unsigned date header can't influence
+        // the skew check.
+        var dateString = hasXmsDate && Request.Headers.TryGetValue("x-ms-date", out var xms)
             ? xms.ToString()
-            : Request.Headers.TryGetValue("Date", out var d) ? d.ToString() : null;
+            : hasDate && Request.Headers.TryGetValue("Date", out var d) ? d.ToString() : null;
 
         if (string.IsNullOrEmpty(dateString))
         {
@@ -129,6 +132,14 @@ public sealed class HmacSha256AuthenticationHandler : AuthenticationHandler<Hmac
             }
             else if (Request.Headers.TryGetValue(name, out var hv))
             {
+                if (hv.Count > 1)
+                {
+                    // A repeated signed header would be joined with ", " here,
+                    // which won't match what a well-behaved client signed.
+                    // Reject rather than silently mis-canonicalize.
+                    return Fail($"Signed header '{name}' has multiple values.", LogLevel.Information);
+                }
+
                 value = hv.ToString();
             }
             else

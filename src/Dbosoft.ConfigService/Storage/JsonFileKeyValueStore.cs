@@ -118,7 +118,7 @@ public sealed class JsonFileKeyValueStore : IKeyValueStore, IDisposable
             existing.ETag = etag;
             existing.LastModified = now;
 
-            await SaveLockedAsync(ct).ConfigureAwait(false);
+            await SaveOrRevertLockedAsync(ct).ConfigureAwait(false);
             return Clone(existing);
         }
         finally
@@ -140,7 +140,7 @@ public sealed class JsonFileKeyValueStore : IKeyValueStore, IDisposable
 
             var snapshot = Clone(existing);
             _data.Entries.Remove(existing);
-            await SaveLockedAsync(ct).ConfigureAwait(false);
+            await SaveOrRevertLockedAsync(ct).ConfigureAwait(false);
             return snapshot;
         }
         finally
@@ -155,14 +155,69 @@ public sealed class JsonFileKeyValueStore : IKeyValueStore, IDisposable
         return _data.ETagCounter.ToString("x16");
     }
 
+    /// <summary>
+    /// Persists the current in-memory state. If the write fails or is
+    /// cancelled, the in-memory state is rolled back to the last successfully
+    /// persisted state so memory and disk never diverge (callers have already
+    /// mutated <c>_data</c> before this runs), then the original exception is
+    /// rethrown.
+    /// </summary>
+    private async Task SaveOrRevertLockedAsync(CancellationToken ct)
+    {
+        try
+        {
+            await SaveLockedAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            RevertToDiskLocked();
+            throw;
+        }
+    }
+
     private async Task SaveLockedAsync(CancellationToken ct)
     {
         var tmp = _filePath + ".tmp";
-        await using (var fs = File.Create(tmp))
+        try
         {
-            await JsonSerializer.SerializeAsync(fs, _data, JsonOptions, ct).ConfigureAwait(false);
+            await using (var fs = File.Create(tmp))
+            {
+                await JsonSerializer.SerializeAsync(fs, _data, JsonOptions, ct).ConfigureAwait(false);
+            }
+
+            File.Move(tmp, _filePath, overwrite: true);
         }
-        File.Move(tmp, _filePath, overwrite: true);
+        catch
+        {
+            // Don't leave a partial temp file behind on failure/cancellation.
+            try
+            {
+                if (File.Exists(tmp))
+                {
+                    File.Delete(tmp);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup; the next successful save overwrites it.
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Restores the in-memory working set from the last-persisted file (the
+    /// atomic temp-file+rename in <see cref="SaveLockedAsync"/> guarantees the
+    /// real file is always a complete prior state, never a partial write).
+    /// </summary>
+    private void RevertToDiskLocked()
+    {
+        var reloaded = LoadOrCreate(_filePath);
+        _data.Version = reloaded.Version;
+        _data.ETagCounter = reloaded.ETagCounter;
+        _data.Entries.Clear();
+        _data.Entries.AddRange(reloaded.Entries);
     }
 
     private static StoreFile LoadOrCreate(string path)
@@ -185,12 +240,19 @@ public sealed class JsonFileKeyValueStore : IKeyValueStore, IDisposable
         }
 
         var entryLabel = e.Label;
-        var queryLabel = string.IsNullOrEmpty(label) ? null : label;
+        var queryLabel = IsNoLabel(label) ? null : label;
         return string.Equals(entryLabel, queryLabel, StringComparison.Ordinal);
     }
 
     private static string? NormalizeLabelForStorage(string? label)
-        => string.IsNullOrEmpty(label) ? null : label;
+        => IsNoLabel(label) ? null : label;
+
+    // The Azure "no label" sentinel is the literal NUL character (sent as
+    // %00). The empty string is treated the same for friendliness with
+    // hand-built clients. Applied consistently on the single-key path (Get /
+    // Set / Delete) as well as in the list filter.
+    private static bool IsNoLabel(string? label)
+        => string.IsNullOrEmpty(label) || label == "\0";
 
     private static KeyValueEntry Clone(KeyValueEntry source) => new()
     {

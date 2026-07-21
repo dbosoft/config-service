@@ -36,6 +36,28 @@ public class KeyValueEndpointsTests : IClassFixture<ConfigServiceWebAppFactory>
     }
 
     [Fact]
+    public async Task Weak_If_None_Match_validator_is_accepted_and_returns_304()
+    {
+        var client = _factory.CreateAdminClient();
+
+        await client.PutAsJsonAsync(
+            "/admin/kv",
+            new AdminPutKeyValueRequest { Key = "weak-etag-test", Value = "v" });
+
+        var first = await client.GetAsync("/kv/weak-etag-test");
+        first.EnsureSuccessStatusCode();
+        var etag = first.Headers.ETag?.Tag;
+        etag.Should().NotBeNullOrEmpty();
+
+        // Present the ETag as a weak validator (W/ prefix); the server must
+        // strip the prefix and still match.
+        var conditional = new HttpRequestMessage(HttpMethod.Get, "/kv/weak-etag-test");
+        conditional.Headers.TryAddWithoutValidation("If-None-Match", "W/" + etag);
+        var second = await client.SendAsync(conditional);
+        second.StatusCode.Should().Be(HttpStatusCode.NotModified);
+    }
+
+    [Fact]
     public async Task List_returns_items_envelope()
     {
         var client = _factory.CreateAdminClient();
@@ -54,6 +76,55 @@ public class KeyValueEndpointsTests : IClassFixture<ConfigServiceWebAppFactory>
         listed.Should().NotBeNull();
         listed!.Items.Should().HaveCount(2);
         listed.Items.Select(i => i.Key).Should().BeEquivalentTo(new[] { "list-a", "list-b" });
+    }
+
+    [Fact]
+    public async Task GET_single_key_sends_the_vendor_kv_content_type()
+    {
+        var client = _factory.CreateAdminClient();
+        await client.PutAsJsonAsync(
+            "/admin/kv",
+            new AdminPutKeyValueRequest { Key = "ct-test", Value = "v" });
+
+        var resp = await client.GetAsync("/kv/ct-test");
+        resp.EnsureSuccessStatusCode();
+
+        resp.Content.Headers.ContentType!.MediaType
+            .Should().Be("application/vnd.microsoft.appconfig.kv+json");
+    }
+
+    [Fact]
+    public async Task List_sends_the_vendor_kvset_content_type()
+    {
+        var client = _factory.CreateAdminClient();
+        await client.PutAsJsonAsync(
+            "/admin/kv",
+            new AdminPutKeyValueRequest { Key = "ctset-a", Value = "1" });
+
+        var resp = await client.GetAsync("/kv?key=ctset-*");
+        resp.EnsureSuccessStatusCode();
+
+        resp.Content.Headers.ContentType!.MediaType
+            .Should().Be("application/vnd.microsoft.appconfig.kvset+json");
+    }
+
+    [Fact]
+    public async Task List_with_percent_encoded_NUL_label_returns_only_unlabeled()
+    {
+        var client = _factory.CreateAdminClient();
+        await client.PutAsJsonAsync(
+            "/admin/kv",
+            new AdminPutKeyValueRequest { Key = "nul-1", Value = "no-label" });
+        await client.PutAsJsonAsync(
+            "/admin/kv",
+            new AdminPutKeyValueRequest { Key = "nul-2", Label = "prod", Value = "prod-label" });
+
+        // %00 is the Azure "no label" sentinel the Microsoft provider sends.
+        var resp = await client.GetAsync("/kv/?key=nul-*&label=%00");
+        resp.EnsureSuccessStatusCode();
+
+        var listed = await resp.Content.ReadFromJsonAsync<KeyValueListWireDto>();
+        listed!.Items.Should().ContainSingle(i => i.Key == "nul-1");
     }
 
     [Fact]

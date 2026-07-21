@@ -89,4 +89,21 @@ public class KeyValueFilterTests
     [InlineData("abc\\", "abc", false)]
     public void Matches_trailing_lone_backslash_is_literal(string filter, string value, bool expected)
         => KeyValueFilter.Matches(value, filter).Should().Be(expected);
+
+    [Theory]
+    // Only a trailing '*' is a wildcard; an interior '*' is a literal
+    // (mid-string wildcards are unsupported and degrade to literals).
+    [InlineData("a*b", "a*b", true)]
+    [InlineData("a*b", "axb", false)]
+    [InlineData("a*b", "ab", false)]
+    public void Matches_interior_star_is_literal(string filter, string value, bool expected)
+        => KeyValueFilter.Matches(value, filter).Should().Be(expected);
+
+    [Theory]
+    // "x\\*" == escaped backslash + trailing wildcard => prefix match on "x\".
+    [InlineData("x\\\\*", "x\\", true)]
+    [InlineData("x\\\\*", "x\\abc", true)]
+    [InlineData("x\\\\*", "xabc", false)]
+    public void Matches_escaped_backslash_then_wildcard_is_prefix(string filter, string value, bool expected)
+        => KeyValueFilter.Matches(value, filter).Should().Be(expected);
 }

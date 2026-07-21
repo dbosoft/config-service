@@ -40,8 +40,10 @@ public static class KeyValueEndpoints
         {
             Items = entries.Select(KeyValueDto.FromEntry).ToList(),
         };
-        ctx.Response.ContentType = KeyValueSetContentType;
-        return Results.Ok(dto);
+        // Use Results.Json with an explicit content type: Results.Ok(dto)
+        // would serialize as application/json and overwrite the vendor media
+        // type the Azure provider expects.
+        return Results.Json(dto, contentType: KeyValueSetContentType);
     }
 
     private static async Task<IResult> GetKeyValue(
@@ -65,8 +67,7 @@ public static class KeyValueEndpoints
 
         ctx.Response.Headers.ETag = $"\"{entry.ETag}\"";
         ctx.Response.Headers.LastModified = entry.LastModified.ToString("R");
-        ctx.Response.ContentType = KeyValueContentType;
-        return Results.Ok(KeyValueDto.FromEntry(entry));
+        return Results.Json(KeyValueDto.FromEntry(entry), contentType: KeyValueContentType);
     }
 
     private static async Task<IResult> HeadKeyValue(
@@ -121,7 +122,14 @@ public static class KeyValueEndpoints
                 continue;
             }
 
-            var trimmed = raw.Trim().Trim('"');
+            var trimmed = raw.Trim();
+            // Strip an optional weak-validator prefix before comparing.
+            if (trimmed.StartsWith("W/", StringComparison.Ordinal))
+            {
+                trimmed = trimmed[2..];
+            }
+
+            trimmed = trimmed.Trim('"');
             if (trimmed == "*" || string.Equals(trimmed, etag, StringComparison.Ordinal))
             {
                 return true;

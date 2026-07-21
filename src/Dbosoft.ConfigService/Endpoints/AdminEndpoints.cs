@@ -32,8 +32,13 @@ public static class AdminEndpoints
         HttpContext ctx,
         IKeyValueStore store,
         IAuditLog audit,
-        [FromBody] AdminPutKeyValueRequest body)
+        [FromBody] AdminPutKeyValueRequest? body)
     {
+        if (body is null)
+        {
+            return Results.BadRequest(new { error = "request body is required" });
+        }
+
         if (string.IsNullOrEmpty(body.Key))
         {
             return Results.BadRequest(new { error = "key is required" });
@@ -69,8 +74,13 @@ public static class AdminEndpoints
         HttpContext ctx,
         IKeyValueStore store,
         IAuditLog audit,
-        [FromBody] AdminDeleteKeyValueRequest body)
+        [FromBody] AdminDeleteKeyValueRequest? body)
     {
+        if (body is null)
+        {
+            return Results.BadRequest(new { error = "request body is required" });
+        }
+
         if (string.IsNullOrEmpty(body.Key))
         {
             return Results.BadRequest(new { error = "key is required" });

@@ -77,7 +77,16 @@ public sealed class JsonFileCredentialStore : ICredentialStore, IDisposable
                 Description = "Bootstrap admin credential",
             });
 
-            await SaveLockedAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await SaveLockedAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Roll back the in-memory add so memory and disk stay in sync.
+                RevertToDiskLocked();
+                throw;
+            }
         }
         finally
         {
@@ -88,11 +97,39 @@ public sealed class JsonFileCredentialStore : ICredentialStore, IDisposable
     private async Task SaveLockedAsync(CancellationToken ct)
     {
         var tmp = _filePath + ".tmp";
-        await using (var fs = File.Create(tmp))
+        try
         {
-            await JsonSerializer.SerializeAsync(fs, _data, JsonOptions, ct).ConfigureAwait(false);
+            await using (var fs = File.Create(tmp))
+            {
+                await JsonSerializer.SerializeAsync(fs, _data, JsonOptions, ct).ConfigureAwait(false);
+            }
+
+            File.Move(tmp, _filePath, overwrite: true);
         }
-        File.Move(tmp, _filePath, overwrite: true);
+        catch
+        {
+            try
+            {
+                if (File.Exists(tmp))
+                {
+                    File.Delete(tmp);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup.
+            }
+
+            throw;
+        }
+    }
+
+    private void RevertToDiskLocked()
+    {
+        var reloaded = LoadOrCreate(_filePath);
+        _data.Version = reloaded.Version;
+        _data.Credentials.Clear();
+        _data.Credentials.AddRange(reloaded.Credentials);
     }
 
     private static StoreFile LoadOrCreate(string path)

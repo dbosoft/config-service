@@ -123,8 +123,14 @@ public class NegativeAuthTests : IClassFixture<NegativeAuthTests.SeededFactory>
     }
 
     [Fact]
-    public async Task Unknown_credential_and_bad_signature_responses_are_indistinguishable()
+    public async Task Unknown_credential_and_bad_signature_return_identical_responses()
     {
+        // NOTE: this checks response *content* parity (status, challenge
+        // header, body) — the observable distinguisher an attacker sees. It
+        // does not measure timing; the handler's dummy-HMAC work equalizes the
+        // credential-lookup outcome, but timing is not asserted here (timing
+        // tests are inherently flaky).
+        //
         // Unknown credential id, otherwise well-formed request.
         var unknownReq = new HttpRequestMessage(HttpMethod.Get, Abs("/kv"));
         Sign(unknownReq, "no-such-credential", _factory.AdminSecret);
@@ -135,10 +141,8 @@ public class NegativeAuthTests : IClassFixture<NegativeAuthTests.SeededFactory>
         Sign(badSigReq, _factory.AdminId, _factory.AdminSecret, signatureOverride: "not-the-real-signature");
         var badSig = await _factory.CreateClient().SendAsync(badSigReq);
 
-        // The whole point of the oracle fix: an attacker must not be able to
-        // tell "that credential exists but I signed wrong" from "no such
-        // credential". Status and challenge header must match, and neither may
-        // carry a distinguishing body.
+        // An attacker must not be able to tell "that credential exists but I
+        // signed wrong" from "no such credential".
         badSig.StatusCode.Should().Be(unknown.StatusCode);
         badSig.Headers.WwwAuthenticate.ToString().Should().Be(unknown.Headers.WwwAuthenticate.ToString());
         (await badSig.Content.ReadAsStringAsync()).Should().Be(await unknown.Content.ReadAsStringAsync());

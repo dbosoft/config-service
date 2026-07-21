@@ -80,6 +80,20 @@ public class AdminEndpointsTests : IClassFixture<ConfigServiceWebAppFactory>
     }
 
     [Fact]
+    public async Task PUT_with_null_json_body_returns_400_not_500()
+    {
+        var client = _factory.CreateAdminClient();
+
+        var req = new HttpRequestMessage(HttpMethod.Put, "/admin/kv")
+        {
+            Content = new StringContent("null", System.Text.Encoding.UTF8, "application/json"),
+        };
+        var resp = await client.SendAsync(req);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
     public async Task Unauthenticated_request_returns_401()
     {
         using var unauthClient = _factory.CreateClient();
