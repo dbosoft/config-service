@@ -24,6 +24,12 @@ WORKDIR /app
 # survive container restarts.
 VOLUME ["/data"]
 ENV ConfigService__DataDirectory=/data
+
+# Serves plain HTTP on 8080. The HMAC Authorization header carries only a
+# signature (never the shared secret), but request/response bodies — i.e. the
+# configuration values themselves — travel in clear text. Terminate TLS at a
+# reverse proxy / ingress in front of this container, or expose it only on a
+# trusted network.
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 

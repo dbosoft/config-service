@@ -98,6 +98,16 @@ docker run --rm -p 8080:8080 \
 The Dockerfile mounts `/data` as a volume so values, credentials, and
 audit log survive container upgrades.
 
+### Transport security
+
+The service listens on plain HTTP. The HMAC `Authorization` header carries
+only a signature — never the shared secret — so the credential itself is not
+exposed on the wire, but the request and response **bodies** (the actual
+configuration values) are sent in clear text. Run it behind a TLS-terminating
+reverse proxy / ingress, or restrict it to a trusted network. The clock-skew
+check (±15 min) limits but does not eliminate replay of a captured signed
+request, which is a further reason to keep traffic on TLS.
+
 ## Quickstart: embed the library in your own host
 
 ```csharp

@@ -28,6 +28,9 @@ internal sealed class KeyValueDto
     [JsonPropertyName("tags")]
     public Dictionary<string, string> Tags { get; set; } = new();
 
+    // Part of the Azure key-value wire shape. This service has no lock
+    // feature, so an entry is never locked; the field is always emitted as
+    // false to keep the response schema the Microsoft provider expects.
     [JsonPropertyName("locked")]
     public bool Locked { get; set; }
 
@@ -42,7 +45,7 @@ internal sealed class KeyValueDto
         ContentType = e.ContentType,
         Value = e.Value,
         Tags = new Dictionary<string, string>(e.Tags),
-        Locked = e.Locked,
+        Locked = false,
         LastModified = e.LastModified,
     };
 }

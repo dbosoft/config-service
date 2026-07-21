@@ -101,6 +101,15 @@ public static class HmacSignature
     /// <summary>
     /// Constant-time comparison of two base64-encoded signatures.
     /// </summary>
+    /// <remarks>
+    /// <see cref="CryptographicOperations.FixedTimeEquals"/> short-circuits
+    /// (returns immediately, without a fixed-time guarantee) when the two
+    /// buffers differ in length. That is safe here only because both operands
+    /// are fixed-format base64 encodings of a 32-byte HMAC-SHA256 hash and are
+    /// therefore always 44 characters long. If this method is ever reused for
+    /// variable-length inputs, the length difference itself would leak through
+    /// timing and this would need to be revisited.
+    /// </remarks>
     public static bool SignaturesEqual(string a, string b)
     {
         var aBytes = Encoding.ASCII.GetBytes(a);

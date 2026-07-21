@@ -4,6 +4,14 @@ using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.WebHost.ConfigureKestrel(options =>
+{
+    // Config values are small (single key-value strings). Cap the request body
+    // well below Kestrel's ~28.6 MB default so an oversized body is rejected at
+    // the transport (413) before the auth handler buffers it into memory.
+    options.Limits.MaxRequestBodySize = 1 * 1024 * 1024; // 1 MiB
+});
+
 builder.Services.AddConfigService(builder.Configuration);
 builder.Services.AddHealthChecks();
 
@@ -16,12 +24,15 @@ var app = builder.Build();
 var options = app.Services.GetRequiredService<IOptions<ConfigServiceOptions>>().Value;
 var credentials = app.Services.GetRequiredService<ICredentialStore>();
 
-if (!string.IsNullOrEmpty(options.BootstrapAdminId)
-    && !string.IsNullOrEmpty(options.BootstrapAdminSecret))
+var bootstrapRequested = !string.IsNullOrEmpty(options.BootstrapAdminId)
+    && !string.IsNullOrEmpty(options.BootstrapAdminSecret);
+var storeWasEmpty = (await credentials.ListAsync()).Count == 0;
+
+if (bootstrapRequested)
 {
     await credentials.EnsureBootstrapAdminAsync(
-        options.BootstrapAdminId,
-        options.BootstrapAdminSecret);
+        options.BootstrapAdminId!,
+        options.BootstrapAdminSecret!);
 }
 
 var existing = await credentials.ListAsync();
@@ -34,6 +45,26 @@ if (existing.Count == 0)
         "on first start. Refusing to run open.");
     Environment.ExitCode = 78; // EX_CONFIG
     return;
+}
+
+if (bootstrapRequested)
+{
+    if (storeWasEmpty)
+    {
+        app.Logger.LogInformation(
+            "Bootstrap admin credential '{Id}' was created. You can now remove " +
+            "ConfigService:BootstrapAdminId / ConfigService:BootstrapAdminSecret " +
+            "(env: ConfigService__BootstrapAdminId / ConfigService__BootstrapAdminSecret) " +
+            "from the environment; they are ignored on subsequent starts.",
+            options.BootstrapAdminId);
+    }
+    else
+    {
+        app.Logger.LogWarning(
+            "Bootstrap admin values are set but the credential store already contains " +
+            "credentials. The bootstrap values are ignored and should be removed from " +
+            "the environment so the secret is not kept around unnecessarily.");
+    }
 }
 
 app.UseAuthentication();

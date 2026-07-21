@@ -20,6 +20,13 @@ public sealed class HmacSha256AuthenticationHandler : AuthenticationHandler<Hmac
 {
     private readonly ICredentialStore _credentials;
 
+    // A syntactically valid base64 key used to compute a throw-away signature
+    // when the presented credential does not exist (or cannot be used). Doing
+    // the same HMAC work in that case keeps timing and the response identical
+    // whether or not the credential exists, so this endpoint can't be used to
+    // enumerate valid credential ids.
+    private static readonly string DummySecretBase64 = Convert.ToBase64String(new byte[32]);
+
     public HmacSha256AuthenticationHandler(
         IOptionsMonitor<HmacSchemeOptions> options,
         ILoggerFactory logger,
@@ -110,10 +117,6 @@ public sealed class HmacSha256AuthenticationHandler : AuthenticationHandler<Hmac
 
         var credential = await _credentials.GetByIdAsync(parameters.CredentialId, Context.RequestAborted)
             .ConfigureAwait(false);
-        if (credential == null || credential.IsRevoked || credential.IsExpired)
-        {
-            return Fail("Unknown, revoked, or expired credential.");
-        }
 
         // Reconstruct string-to-sign from the headers as actually present.
         var headerValues = new List<string>(signedHeaderNames.Length);
@@ -147,26 +150,44 @@ public sealed class HmacSha256AuthenticationHandler : AuthenticationHandler<Hmac
             : rawTarget;
         var stringToSign = HmacSignature.BuildStringToSign(Request.Method, pathAndQuery, headerValues);
 
+        // Compute the expected signature even when the credential is unknown,
+        // revoked, or expired (using a dummy key in that case) so the work done
+        // and the response returned are identical regardless of whether the
+        // credential exists. The specific reason is logged server-side (see
+        // Fail) but never returned to the caller (see HandleChallengeAsync),
+        // so the two failure modes are indistinguishable from the outside.
+        var credentialUsable = credential is { IsRevoked: false, IsExpired: false };
+        var secretBase64 = credentialUsable ? credential!.SecretBase64 : DummySecretBase64;
+
         string expectedSignature;
         try
         {
-            expectedSignature = HmacSignature.ComputeSignature(stringToSign, credential.SecretBase64);
+            expectedSignature = HmacSignature.ComputeSignature(stringToSign, secretBase64);
         }
         catch (FormatException)
         {
-            return Fail("Stored credential secret is not valid base64.");
+            // Stored secret is not valid base64. Still spend comparable work so
+            // this looks identical to any other failure from the outside.
+            expectedSignature = HmacSignature.ComputeSignature(stringToSign, DummySecretBase64);
+            credentialUsable = false;
         }
 
-        if (!HmacSignature.SignaturesEqual(expectedSignature, parameters.Signature))
+        var signatureMatches = HmacSignature.SignaturesEqual(expectedSignature, parameters.Signature);
+        if (!credentialUsable || !signatureMatches)
         {
-            return Fail("Invalid signature.");
+            return Fail(credential is null
+                ? "Unknown credential id."
+                : !credentialUsable
+                    ? "Credential is revoked, expired, or has an invalid stored secret."
+                    : "Signature mismatch.");
         }
 
+        var authenticated = credential!;
         var claims = new[]
         {
-            new Claim(ClaimTypes.NameIdentifier, credential.Id),
-            new Claim(ClaimTypes.Name, credential.Id),
-            new Claim(ClaimTypes.Role, credential.Role.ToString()),
+            new Claim(ClaimTypes.NameIdentifier, authenticated.Id),
+            new Claim(ClaimTypes.Name, authenticated.Id),
+            new Claim(ClaimTypes.Role, authenticated.Role.ToString()),
         };
         var identity = new ClaimsIdentity(claims, HmacSignature.SchemeName);
         var principal = new ClaimsPrincipal(identity);
@@ -174,21 +195,25 @@ public sealed class HmacSha256AuthenticationHandler : AuthenticationHandler<Hmac
         return AuthenticateResult.Success(ticket);
     }
 
-    private const string FailureReasonItemKey = "Dbosoft.ConfigService.HmacFailureReason";
-
     private AuthenticateResult Fail(string reason)
     {
-        Context.Items[FailureReasonItemKey] = reason;
+        // Log the specific reason for operators (this is the only place a
+        // failed authentication is recorded, which helps detect scanning and
+        // brute-force probing) but never surface it to the caller.
+        Logger.LogWarning(
+            "HMAC authentication failed: {Reason} (remoteIp={RemoteIp})",
+            reason,
+            Context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
         return AuthenticateResult.Fail(reason);
     }
 
     protected override Task HandleChallengeAsync(AuthenticationProperties properties)
     {
         Response.StatusCode = StatusCodes.Status401Unauthorized;
-        var reason = Context.Items.TryGetValue(FailureReasonItemKey, out var r) ? r as string : null;
-        Response.Headers.WWWAuthenticate = string.IsNullOrEmpty(reason)
-            ? HmacSignature.SchemeName
-            : $"{HmacSignature.SchemeName} error_description=\"{reason.Replace('"', '\'')}\"";
+        // Deliberately generic: the specific failure reason is logged
+        // server-side but never returned, so the endpoint can't be used to
+        // enumerate credential ids or otherwise probe why a request failed.
+        Response.Headers.WWWAuthenticate = HmacSignature.SchemeName;
         return Task.CompletedTask;
     }
 

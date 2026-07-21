@@ -55,9 +55,9 @@ public sealed class JsonFileKeyValueStore : IKeyValueStore, IDisposable
         {
             IEnumerable<KeyValueEntry> q = _data.Entries;
 
-            if (!IsAnyFilter(keyFilter))
+            if (!KeyValueFilter.IsMatchAll(keyFilter))
             {
-                q = q.Where(e => MatchesFilter(e.Key, keyFilter!));
+                q = q.Where(e => KeyValueFilter.Matches(e.Key, keyFilter));
             }
 
             // Per the Azure App Configuration protocol the "no label"
@@ -68,9 +68,9 @@ public sealed class JsonFileKeyValueStore : IKeyValueStore, IDisposable
             {
                 q = q.Where(e => e.Label == null);
             }
-            else if (!IsAnyFilter(labelFilter))
+            else if (!KeyValueFilter.IsMatchAll(labelFilter))
             {
-                q = q.Where(e => MatchesFilter(e.Label ?? "", labelFilter!));
+                q = q.Where(e => KeyValueFilter.Matches(e.Label ?? "", labelFilter));
             }
 
             return q
@@ -192,9 +192,6 @@ public sealed class JsonFileKeyValueStore : IKeyValueStore, IDisposable
     private static string? NormalizeLabelForStorage(string? label)
         => string.IsNullOrEmpty(label) ? null : label;
 
-    private static bool IsAnyFilter(string? filter)
-        => filter == null || filter == "*";
-
     private static KeyValueEntry Clone(KeyValueEntry source) => new()
     {
         Key = source.Key,
@@ -203,19 +200,8 @@ public sealed class JsonFileKeyValueStore : IKeyValueStore, IDisposable
         ContentType = source.ContentType,
         ETag = source.ETag,
         LastModified = source.LastModified,
-        Locked = source.Locked,
         Tags = new Dictionary<string, string>(source.Tags),
     };
-
-    private static bool MatchesFilter(string value, string filter)
-    {
-        if (filter.EndsWith('*'))
-        {
-            var prefix = filter[..^1];
-            return value.StartsWith(prefix, StringComparison.Ordinal);
-        }
-        return string.Equals(value, filter, StringComparison.Ordinal);
-    }
 
     public void Dispose() => _lock.Dispose();
 

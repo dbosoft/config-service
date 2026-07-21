@@ -64,6 +64,29 @@ public class JsonLinesAuditLogTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadAsync_skips_corrupt_lines_and_returns_the_valid_ones()
+    {
+        await _log.AppendAsync(new AuditEntry { Action = "PUT", Key = "k1", NewValue = "v1", CredentialId = "x" });
+
+        // Simulate a partially-written / corrupted line landing in the file
+        // between two good entries (e.g. a crash mid-write).
+        await File.AppendAllTextAsync(
+            Path.Combine(_dataDir, "audit.jsonl"),
+            "this is not valid json" + Environment.NewLine);
+
+        await _log.AppendAsync(new AuditEntry { Action = "PUT", Key = "k2", NewValue = "v2", CredentialId = "x" });
+
+        var entries = new List<AuditEntry>();
+        await foreach (var e in _log.ReadAsync())
+        {
+            entries.Add(e);
+        }
+
+        entries.Should().HaveCount(2);
+        entries.Select(e => e.Key).Should().BeEquivalentTo(new[] { "k1", "k2" });
+    }
+
+    [Fact]
     public async Task ReadAsync_with_key_filter_returns_only_matching_entries()
     {
         await _log.AppendAsync(new AuditEntry { Action = "PUT", Key = "a", NewValue = "1", CredentialId = "x" });

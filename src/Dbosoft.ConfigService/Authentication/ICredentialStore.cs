@@ -14,7 +14,14 @@ public interface ICredentialStore
     /// If the store is currently empty, atomically create the supplied admin
     /// credential. If the store already contains any credentials this is a
     /// no-op. Used by host startup to bootstrap a fresh deployment from
-    /// environment variables without leaving secrets on disk in plaintext.
+    /// environment variables.
     /// </summary>
+    /// <remarks>
+    /// The HMAC scheme requires the shared secret to recompute signatures, so
+    /// the secret is persisted in plaintext in <c>credentials.json</c> (see
+    /// <see cref="Credential"/>). Protect that file with filesystem
+    /// permissions / a restricted volume; the bootstrap value is not
+    /// obfuscated or encrypted at rest.
+    /// </remarks>
     Task EnsureBootstrapAdminAsync(string id, string secretBase64, CancellationToken ct = default);
 }

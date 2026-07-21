@@ -97,6 +97,10 @@ public static class KeyValueEndpoints
             .Select(e => e.Label)
             .Where(l => l != null)
             .Distinct()
+            // Apply the optional name filter with the same semantics as the
+            // key/label filters (null or "*" => all; prefix and comma-list
+            // supported). Without this the parameter was silently ignored.
+            .Where(l => KeyValueFilter.Matches(l!, name))
             .OrderBy(l => l, StringComparer.Ordinal)
             .Select(l => new { name = l })
             .ToList();

@@ -28,7 +28,5 @@ public class KeyValueEntry
 
     public DateTimeOffset LastModified { get; set; }
 
-    public bool Locked { get; set; }
-
     public Dictionary<string, string> Tags { get; set; } = new();
 }
