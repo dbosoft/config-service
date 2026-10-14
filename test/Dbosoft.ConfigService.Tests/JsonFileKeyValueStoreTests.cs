@@ -200,4 +200,79 @@ public class JsonFileKeyValueStoreTests : IDisposable
         entry.Should().NotBeNull();
         entry!.Value.Should().Be("persistent");
     }
+
+    private static KeyValueEntry Item(string key, string? value) => new() { Key = key, Value = value };
+
+    [Fact]
+    public async Task Replace_leaves_exactly_the_given_set_of_the_label()
+    {
+        await _store.SetAsync("stale", null, "old", null, null);
+        await _store.SetAsync("kept", null, "old", null, null);
+
+        await _store.ReplaceAsync(null, [Item("kept", "new"), Item("added", "new")]);
+
+        var listed = await _store.ListAsync("*", "");
+        listed.Select(e => (e.Key, e.Value)).Should().BeEquivalentTo([("added", "new"), ("kept", "new")]);
+    }
+
+    [Fact]
+    public async Task Replace_leaves_other_labels_alone()
+    {
+        await _store.SetAsync("k", "Prod", "prod", null, null);
+
+        await _store.ReplaceAsync(null, [Item("k", "unlabeled")]);
+
+        (await _store.GetAsync("k", "Prod"))!.Value.Should().Be("prod");
+    }
+
+    // A reader holding an ETag asks again with If-None-Match; an entry the set did not change must
+    // still answer "not modified".
+    [Fact]
+    public async Task Replace_keeps_the_ETag_of_an_entry_it_does_not_change()
+    {
+        var first = await _store.SetAsync("same", null, "v", null, null);
+
+        var (_, after) = await _store.ReplaceAsync(null, [Item("same", "v"), Item("other", "x")]);
+
+        after.Single(e => e.Key == "same").ETag.Should().Be(first.ETag);
+    }
+
+    [Fact]
+    public async Task Replace_refuses_a_key_given_twice_and_changes_nothing()
+    {
+        await _store.SetAsync("k", null, "before", null, null);
+
+        var replace = () => _store.ReplaceAsync(null, [Item("k", "a"), Item("k", "b")]);
+
+        await replace.Should().ThrowAsync<ArgumentException>();
+        (await _store.GetAsync("k", null))!.Value.Should().Be("before");
+    }
+
+    [Fact]
+    public async Task A_replaced_set_is_what_the_next_start_reads()
+    {
+        await _store.ReplaceAsync(null, [Item("a", "1"), Item("b", "2")]);
+
+        using var reopened = new JsonFileKeyValueStore(Options.Create(new ConfigServiceOptions { DataDirectory = _dataDir }));
+        (await reopened.ListAsync("*", "")).Select(e => e.Key).Should().BeEquivalentTo(["a", "b"]);
+    }
+
+    // A file system without an atomic rename, or a machine stopping mid-write, leaves the file
+    // partly written or missing; the start takes the copy of the state before.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_start_after_an_interrupted_write_reads_the_state_before_it(bool fileLeftPartly)
+    {
+        await _store.SetAsync("k", null, "before", null, null);
+        await _store.SetAsync("k", null, "after", null, null);
+        var file = Path.Combine(_dataDir, "values.json");
+        if (fileLeftPartly)
+            await File.WriteAllTextAsync(file, "{\"version\":1,\"entries\":[{\"key\":");
+        else
+            File.Delete(file);
+
+        using var reopened = new JsonFileKeyValueStore(Options.Create(new ConfigServiceOptions { DataDirectory = _dataDir }));
+        (await reopened.GetAsync("k", null))!.Value.Should().Be("before");
+    }
 }

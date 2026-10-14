@@ -5,10 +5,19 @@ using Microsoft.Extensions.Options;
 namespace Dbosoft.ConfigService.Storage;
 
 /// <summary>
-/// Single-file JSON-backed key-value store. Holds the working set in memory,
-/// serializes the entire file on every successful write via a temp-file +
-/// rename for atomicity. Suitable for small-to-medium configuration sets
-/// (hundreds to a few thousand keys); not designed for high write volume.
+/// Single-file JSON-backed key-value store. Holds the working set in memory and
+/// writes the entire file on every successful write. Suitable for small-to-medium
+/// configuration sets (hundreds to a few thousand keys); not designed for high
+/// write volume.
+///
+/// <para>
+/// A write keeps a copy of the last good file (<c>values.json.bak</c>), writes the
+/// new state to a temp file flushed through to the disk, and renames it over the
+/// file. The rename replaces the file in one step where the file system offers
+/// that; where it does not, or the machine stops between the steps, the next start
+/// finds the file missing or unreadable and takes the copy — the state before
+/// the write that did not finish.
+/// </para>
 /// </summary>
 public sealed class JsonFileKeyValueStore : IKeyValueStore, IDisposable
 {
@@ -127,6 +136,58 @@ public sealed class JsonFileKeyValueStore : IKeyValueStore, IDisposable
         }
     }
 
+    public async Task<(IReadOnlyList<KeyValueEntry> Before, IReadOnlyList<KeyValueEntry> After)> ReplaceAsync(
+        string? label,
+        IReadOnlyList<KeyValueEntry> entries,
+        CancellationToken ct = default)
+    {
+        var normalized = NormalizeLabelForStorage(label);
+        var duplicate = entries.GroupBy(e => e.Key, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
+        if (duplicate is not null)
+        {
+            throw new ArgumentException($"The key '{duplicate.Key}' is given more than once.", nameof(entries));
+        }
+
+        await _lock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var before = _data.Entries.Where(e => e.Label == normalized).ToList();
+            var now = DateTimeOffset.UtcNow;
+            var after = new List<KeyValueEntry>();
+            foreach (var entry in entries)
+            {
+                var current = before.FirstOrDefault(e => string.Equals(e.Key, entry.Key, StringComparison.Ordinal));
+                // An entry written unchanged keeps its ETag, so a reader's If-None-Match still holds.
+                var unchanged = current is not null
+                                && current.Value == entry.Value
+                                && current.ContentType == entry.ContentType
+                                && current.Tags.Count == entry.Tags.Count
+                                && !current.Tags.Except(entry.Tags).Any();
+                after.Add(unchanged
+                    ? Clone(current!)
+                    : new KeyValueEntry
+                    {
+                        Key = entry.Key,
+                        Label = normalized,
+                        Value = entry.Value,
+                        ContentType = entry.ContentType,
+                        Tags = new Dictionary<string, string>(entry.Tags),
+                        ETag = NextEtagLocked(),
+                        LastModified = now,
+                    });
+            }
+
+            _data.Entries.RemoveAll(e => e.Label == normalized);
+            _data.Entries.AddRange(after);
+            await SaveOrRevertLockedAsync(ct).ConfigureAwait(false);
+            return (before.Select(Clone).ToList(), after.Select(Clone).ToList());
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     public async Task<KeyValueEntry?> DeleteAsync(string key, string? label, CancellationToken ct = default)
     {
         await _lock.WaitAsync(ct).ConfigureAwait(false);
@@ -180,9 +241,16 @@ public sealed class JsonFileKeyValueStore : IKeyValueStore, IDisposable
         var tmp = _filePath + ".tmp";
         try
         {
-            await using (var fs = File.Create(tmp))
+            if (File.Exists(_filePath))
+            {
+                File.Copy(_filePath, BackupPath(_filePath), overwrite: true);
+            }
+
+            await using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
             {
                 await JsonSerializer.SerializeAsync(fs, _data, JsonOptions, ct).ConfigureAwait(false);
+                // Through the operating system's cache to the disk, before the rename makes it the file.
+                fs.Flush(flushToDisk: true);
             }
 
             File.Move(tmp, _filePath, overwrite: true);
@@ -222,15 +290,31 @@ public sealed class JsonFileKeyValueStore : IKeyValueStore, IDisposable
 
     private static StoreFile LoadOrCreate(string path)
     {
+        var backup = BackupPath(path);
         if (!File.Exists(path))
         {
-            return new StoreFile();
+            // Missing while a copy exists: a write stopped between giving up the file and the rename.
+            return File.Exists(backup) ? Read(backup) : new StoreFile();
         }
 
-        using var fs = File.OpenRead(path);
-        var loaded = JsonSerializer.Deserialize<StoreFile>(fs, JsonOptions);
-        return loaded ?? new StoreFile();
+        try
+        {
+            return Read(path);
+        }
+        catch (JsonException) when (File.Exists(backup))
+        {
+            // A file system without an atomic rename can leave a partly written file behind.
+            return Read(backup);
+        }
     }
+
+    private static StoreFile Read(string path)
+    {
+        using var fs = File.OpenRead(path);
+        return JsonSerializer.Deserialize<StoreFile>(fs, JsonOptions) ?? new StoreFile();
+    }
+
+    private static string BackupPath(string path) => path + ".bak";
 
     private static bool Matches(KeyValueEntry e, string key, string? label)
     {

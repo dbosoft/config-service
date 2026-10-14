@@ -73,6 +73,16 @@ public sealed class AdminPutKeyValueRequest
     public Dictionary<string, string>? Tags { get; set; }
 }
 
+/// <summary>
+/// Body of the admin PUT to <c>/admin/kv-set</c>: the complete set of entries of one label. Keys of
+/// that label not named here are removed, in the same write.
+/// </summary>
+public sealed class AdminReplaceSetRequest
+{
+    public string? Label { get; set; }
+    public List<AdminPutKeyValueRequest> Items { get; set; } = new();
+}
+
 public sealed class AdminDeleteKeyValueRequest
 {
     public string Key { get; set; } = "";

@@ -36,9 +36,13 @@ discussion.
 - **Admin API** under `/admin` for write operations (`PUT`, `DELETE`,
   `GET /admin/audit`). Not part of the Azure protocol — used by tooling
   to manage values. Requires an `Admin` role credential.
+  `PUT /admin/kv-set` replaces every entry of one label in a single write,
+  so a configuration written as a whole is never read half old, half new.
 - **JSON file storage** for values, credentials, and the audit log. No
   database. The whole working set lives in three files in a configurable
-  data directory.
+  data directory. A write keeps a copy of the last good values file,
+  flushes the new one to disk and renames it into place; a start after an
+  interrupted write reads the copy.
 - **Append-only audit log** capturing every admin write with `OldValue`,
   `NewValue`, credential id, timestamp, and client IP.
 

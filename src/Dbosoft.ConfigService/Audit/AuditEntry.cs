@@ -8,7 +8,7 @@ public class AuditEntry
 {
     public DateTimeOffset Timestamp { get; set; }
 
-    /// <summary>"PUT" or "DELETE".</summary>
+    /// <summary>"PUT" or "DELETE"; a replaced set is recorded as one of them per key it changed.</summary>
     public string Action { get; set; } = "";
 
     public string Key { get; set; } = "";
