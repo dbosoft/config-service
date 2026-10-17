@@ -94,6 +94,44 @@ public sealed class JsonFileCredentialStore : ICredentialStore, IDisposable
         }
     }
 
+    public async Task SetDeclaredReaderAsync(string id, string secretBase64, CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var existing = _data.Credentials.FirstOrDefault(c => string.Equals(c.Id, id, StringComparison.Ordinal));
+            if (existing is { Role: not CredentialRole.Reader })
+                throw new InvalidOperationException($"The credential '{id}' exists with the role {existing.Role}, not Reader.");
+            if (existing is not null && existing.SecretBase64 == secretBase64 && existing.RevokedAt is null)
+                return;
+
+            if (existing is not null)
+                _data.Credentials.Remove(existing);
+            _data.Credentials.Add(new Credential
+            {
+                Id = id,
+                SecretBase64 = secretBase64,
+                Role = CredentialRole.Reader,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Description = "Reader credential declared by the platform",
+            });
+
+            try
+            {
+                await SaveLockedAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                RevertToDiskLocked();
+                throw;
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     private async Task SaveLockedAsync(CancellationToken ct)
     {
         var tmp = _filePath + ".tmp";

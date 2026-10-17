@@ -24,4 +24,11 @@ public interface ICredentialStore
     /// obfuscated or encrypted at rest.
     /// </remarks>
     Task EnsureBootstrapAdminAsync(string id, string secretBase64, CancellationToken ct = default);
+
+    /// <summary>
+    /// Keeps a Reader credential with this id and secret, adding it or replacing its secret. The
+    /// platform declares it on every start, so a secret rotated where the platform keeps it takes
+    /// effect at the next start. An Admin credential of the same id is refused, never downgraded.
+    /// </summary>
+    Task SetDeclaredReaderAsync(string id, string secretBase64, CancellationToken ct = default);
 }

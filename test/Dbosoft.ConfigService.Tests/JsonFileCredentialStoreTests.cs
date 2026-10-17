@@ -53,6 +53,37 @@ public class JsonFileCredentialStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task A_declared_reader_is_added_beside_the_admin()
+    {
+        await _store.EnsureBootstrapAdminAsync("admin", SecretBase64("a"));
+        await _store.SetDeclaredReaderAsync("modules", SecretBase64("r"));
+
+        (await _store.GetByIdAsync("modules"))!.Role.Should().Be(CredentialRole.Reader);
+        (await _store.GetByIdAsync("admin"))!.Role.Should().Be(CredentialRole.Admin);
+    }
+
+    [Fact]
+    public async Task A_declared_reader_takes_a_rotated_secret()
+    {
+        await _store.SetDeclaredReaderAsync("modules", SecretBase64("old"));
+        await _store.SetDeclaredReaderAsync("modules", SecretBase64("new"));
+
+        var all = await _store.ListAsync();
+        all.Should().ContainSingle(c => c.Id == "modules").Which.SecretBase64.Should().Be(SecretBase64("new"));
+    }
+
+    [Fact]
+    public async Task An_admin_is_never_turned_into_a_reader()
+    {
+        await _store.EnsureBootstrapAdminAsync("admin", SecretBase64("a"));
+
+        var act = () => _store.SetDeclaredReaderAsync("admin", SecretBase64("r"));
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await _store.GetByIdAsync("admin"))!.Role.Should().Be(CredentialRole.Admin);
+    }
+
+    [Fact]
     public async Task Credentials_persist_across_store_instances()
     {
         await _store.EnsureBootstrapAdminAsync("admin", SecretBase64("seed"));

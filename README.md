@@ -87,6 +87,12 @@ On first start the bootstrap credential is written to
 `<DataDirectory>/credentials.json` and the env vars are ignored on
 subsequent starts.
 
+A reader credential can be declared the same way, with
+`ConfigService__ReaderId` and `ConfigService__ReaderSecret`. Unlike the
+bootstrap admin it is set on every start, so a secret rotated where the
+platform keeps it takes effect at the next start. Give it to the
+applications that only read their configuration.
+
 ### Docker
 
 ```bash
