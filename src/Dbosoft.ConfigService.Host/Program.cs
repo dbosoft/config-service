@@ -47,6 +47,19 @@ if (bootstrapRequested)
         options.BootstrapAdminSecret!);
 }
 
+var readerRequested = !string.IsNullOrEmpty(options.ReaderId) && !string.IsNullOrEmpty(options.ReaderSecret);
+if (readerRequested && !IsBase64(options.ReaderSecret!))
+{
+    app.Logger.LogCritical("ConfigService:ReaderSecret is not valid base64. Refusing to start.");
+    Environment.ExitCode = 78; // EX_CONFIG
+    return;
+}
+
+// Declared after the bootstrap admin: a reader alone in an empty store would stop the admin from
+// ever being created.
+if (readerRequested)
+    await credentials.SetDeclaredReaderAsync(options.ReaderId!, options.ReaderSecret!);
+
 var existing = await credentials.ListAsync();
 if (existing.Count == 0)
 {

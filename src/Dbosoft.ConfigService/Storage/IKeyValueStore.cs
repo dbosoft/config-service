@@ -46,6 +46,17 @@ public interface IKeyValueStore
         CancellationToken ct = default);
 
     /// <summary>
+    /// Replaces every entry of <paramref name="label"/> with <paramref name="entries"/> in one
+    /// write: a reader sees either the set before or the set after, never a mix, and a failure
+    /// leaves the set before. Entries of other labels are untouched. Returns the entries before
+    /// and after, for the audit.
+    /// </summary>
+    Task<(IReadOnlyList<KeyValueEntry> Before, IReadOnlyList<KeyValueEntry> After)> ReplaceAsync(
+        string? label,
+        IReadOnlyList<KeyValueEntry> entries,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Deletes the matching entry and returns the deleted snapshot, or
     /// <c>null</c> if nothing matched.
     /// </summary>

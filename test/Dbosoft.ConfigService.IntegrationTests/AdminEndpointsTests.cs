@@ -127,4 +127,48 @@ public class AdminEndpointsTests : IClassFixture<ConfigServiceWebAppFactory>
         public string? OldValue { get; set; }
         public string? NewValue { get; set; }
     }
+
+    [Fact]
+    public async Task PUT_kv_set_replaces_the_label_and_audits_each_change()
+    {
+        var client = _factory.CreateAdminClient();
+        const string label = "set-test";
+        (await client.PutAsJsonAsync("/admin/kv", new AdminPutKeyValueRequest { Key = "Stale", Label = label, Value = "old" }))
+            .EnsureSuccessStatusCode();
+        (await client.PutAsJsonAsync("/admin/kv", new AdminPutKeyValueRequest { Key = "Kept", Label = label, Value = "same" }))
+            .EnsureSuccessStatusCode();
+
+        var put = await client.PutAsJsonAsync("/admin/kv-set", new AdminReplaceSetRequest
+        {
+            Label = label,
+            Items =
+            [
+                new AdminPutKeyValueRequest { Key = "Kept", Value = "same" },
+                new AdminPutKeyValueRequest { Key = "Added", Value = "{}", ContentType = "application/json" },
+            ],
+        });
+        put.EnsureSuccessStatusCode();
+
+        var listed = await (await client.GetAsync($"/kv?key=*&label={label}")).Content.ReadFromJsonAsync<KeyValueListWireDto>();
+        listed!.Items.Select(i => i.Key).Should().BeEquivalentTo(["Added", "Kept"]);
+
+        var audit = await client.GetFromJsonAsync<List<Dbosoft.ConfigService.Audit.AuditEntry>>("/admin/audit");
+        var ofSet = audit!.Where(a => a.Label == label).Skip(2).ToList();
+        ofSet.Select(a => (a.Action, a.Key)).Should().BeEquivalentTo([("PUT", "Added"), ("DELETE", "Stale")],
+            "an entry the set did not change is not a change");
+    }
+
+    [Fact]
+    public async Task PUT_kv_set_refuses_a_key_given_twice()
+    {
+        var client = _factory.CreateAdminClient();
+
+        var put = await client.PutAsJsonAsync("/admin/kv-set", new AdminReplaceSetRequest
+        {
+            Label = "dup-test",
+            Items = [new AdminPutKeyValueRequest { Key = "K", Value = "a" }, new AdminPutKeyValueRequest { Key = "K", Value = "b" }],
+        });
+
+        put.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
 }

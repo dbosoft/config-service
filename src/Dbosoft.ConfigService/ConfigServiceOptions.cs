@@ -32,6 +32,16 @@ public class ConfigServiceOptions
     public string? BootstrapAdminSecret { get; set; }
 
     /// <summary>
+    /// Id of a Reader credential the platform declares. Set together with
+    /// <see cref="ReaderSecret"/>, it is kept with that secret on every start,
+    /// so the applications reading the configuration need no admin credential.
+    /// </summary>
+    public string? ReaderId { get; set; }
+
+    /// <summary>Base64-encoded HMAC secret of the <see cref="ReaderId"/> credential.</summary>
+    public string? ReaderSecret { get; set; }
+
+    /// <summary>
     /// Maximum allowed clock skew between client and server for HMAC date
     /// header validation. Default 15 minutes, matching the Azure App
     /// Configuration data-plane API.
