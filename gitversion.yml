@@ -1,0 +1,7 @@
+# Version floor until the first release tag; a tag (vX.Y.Z) overrides this afterwards.
+next-version: 0.1.0
+assembly-versioning-scheme: MajorMinor
+branches:
+  main:
+    deployment-mode: ContinuousDelivery
+    label: ci

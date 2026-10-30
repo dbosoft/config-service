@@ -1,0 +1,110 @@
+# Version with GitVersion, build, test, pack and push to the dbosoft Public feed.
+# Runs on main and on release tags (v*); every green main build publishes a CI-versioned package.
+trigger:
+  branches:
+    include:
+      - main
+      - refs/tags/v*
+
+# A manual run can push a branch build as a test package, labelled with the branch name by GitVersion.
+parameters:
+- name: publishTestPackage
+  displayName: Push this branch build to the Public feed as a test package
+  type: boolean
+  default: false
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  buildConfiguration: 'Release'
+  solution: 'Dbosoft.ConfigService.slnx'
+  isTagBuild: $[ startsWith(variables['Build.SourceBranch'], 'refs/tags/v') ]
+
+steps:
+- checkout: self
+  fetchDepth: 0          # GitVersion needs the full history
+  clean: true
+
+# The 8 SDK brings the ASP.NET Core 8 runtime the tests run on; the newer SDK, installed last, builds
+# (the .slnx needs it).
+- task: UseDotNet@2
+  displayName: Install .NET 8 SDK
+  inputs:
+    packageType: sdk
+    version: '8.0.x'
+
+- task: UseDotNet@2
+  displayName: Install .NET SDK
+  inputs:
+    packageType: sdk
+    version: '10.0.x'
+
+# On a detached-HEAD tag build GitVersion 6 relabels a pre-release tag to the branch's label or
+# falls back to '-no-branch-' (GitVersion #4534); tag builds take the version from the tag instead.
+- task: gitversion/setup@3
+  displayName: Install GitVersion
+  condition: ne(variables['isTagBuild'], 'True')
+  inputs:
+    versionSpec: '6.7.x'
+
+- task: gitversion/execute@3
+  displayName: Execute GitVersion
+  condition: ne(variables['isTagBuild'], 'True')
+  inputs:
+    configFilePath: 'gitversion.yml'
+
+- pwsh: |
+    $v = '$(GitVersion.SemVer)'
+    Write-Host "##vso[task.setvariable variable=packageVersion]$v"
+    Write-Host "##vso[build.updatebuildnumber]$v"
+  displayName: Resolve version from GitVersion
+  condition: ne(variables['isTagBuild'], 'True')
+
+- pwsh: |
+    $v = "$env:BUILD_SOURCEBRANCH" -replace '^refs/tags/v', ''
+    Write-Host "##vso[task.setvariable variable=packageVersion]$v"
+    Write-Host "##vso[build.updatebuildnumber]$v"
+  displayName: Resolve version from tag
+  condition: eq(variables['isTagBuild'], 'True')
+
+- task: DotNetCoreCLI@2
+  displayName: dotnet build
+  inputs:
+    command: build
+    projects: '$(solution)'
+    arguments: '--configuration $(buildConfiguration) -p:Version=$(packageVersion)'
+
+- task: DotNetCoreCLI@2
+  displayName: dotnet test
+  inputs:
+    command: test
+    projects: '$(solution)'
+    arguments: '--configuration $(buildConfiguration) --no-build'
+    publishTestResults: true
+
+- task: DotNetCoreCLI@2
+  displayName: dotnet pack
+  inputs:
+    command: pack
+    packagesToPack: '$(solution)'
+    nobuild: true
+    configuration: '$(buildConfiguration)'
+    packDirectory: '$(Build.ArtifactStagingDirectory)'
+    buildProperties: 'Version=$(packageVersion)'
+
+- task: PublishBuildArtifacts@1
+  displayName: Publish package artifacts
+  inputs:
+    ArtifactName: build-packages
+
+# Main and tags reach the feed, a branch only when a manual run asks for it; pull requests never.
+# dotnet push, not NuGetCommand@2, whose NuGet.exe needs mono, which newer Ubuntu images lack.
+- task: DotNetCoreCLI@2
+  displayName: Push to the Public feed
+  condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'), or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['isTagBuild'], 'True'), ${{ parameters.publishTestPackage }}))
+  inputs:
+    command: push
+    packagesToPush: '$(Build.ArtifactStagingDirectory)/**/*.nupkg;!$(Build.ArtifactStagingDirectory)/**/*.symbols.nupkg'
+    nuGetFeedType: internal
+    publishVstsFeed: '59a3608a-9bed-4cb4-9467-6efaaa3cbef5/1e425ef4-e3a0-4927-b4c0-2beff753cb88'
