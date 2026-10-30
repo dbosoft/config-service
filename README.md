@@ -17,10 +17,8 @@ error: settings are key-value reads, not events. A versioned key-value
 store fronted by a small HTTP API is exactly the right primitive — and
 Azure already specified the protocol, so we don't have to.
 
-The original use case is the SAPId project's `Scim:BackendMode` setting
-that was duplicated across the API, Controller, and SCIM modules; see the
-RFC at `docs/config_service_rfc.md` in that repository for the full
-discussion.
+The original use case was a mode setting that was duplicated across the
+API, controller and SCIM modules of one application.
 
 ## What it implements
 
@@ -109,6 +107,9 @@ check (±15 min) limits but does not eliminate replay of a captured signed
 request, which is a further reason to keep traffic on TLS.
 
 ## Quickstart: embed the library in your own host
+
+The library is the `Dbosoft.ConfigService` package on the dbosoft public feed
+(`https://pkgs.dev.azure.com/dbosoft/public/_packaging/Public/nuget/v3/index.json`).
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
@@ -234,7 +235,7 @@ Two test projects:
 
 ## License
 
-Not yet declared. Contact dbosoft.
+MIT, see [LICENSE](LICENSE).
 
 [Azure App Configuration data-plane REST API]: https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/azure-app-configuration/rest-api.md
 [nuget-provider]: https://github.com/Azure/AppConfiguration-DotnetProvider

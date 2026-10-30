@@ -2,6 +2,8 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <!-- Shipped as an image, not as a package. -->
+    <IsPackable>false</IsPackable>
     <RootNamespace>Dbosoft.ConfigService.Host</RootNamespace>
     <AssemblyName>Dbosoft.ConfigService.Host</AssemblyName>
     <UserSecretsId>dbosoft-configservice-host</UserSecretsId>
