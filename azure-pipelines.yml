@@ -6,6 +6,13 @@ trigger:
       - main
       - refs/tags/v*
 
+# A manual run can push a branch build as a test package, labelled with the branch name by GitVersion.
+parameters:
+- name: publishTestPackage
+  displayName: Push this branch build to the Public feed as a test package
+  type: boolean
+  default: false
+
 pool:
   vmImage: ubuntu-latest
 
@@ -91,11 +98,11 @@ steps:
   inputs:
     ArtifactName: build-packages
 
-# Only main and tags reach the feed; pull request and branch builds stop after packing.
+# Main and tags reach the feed, a branch only when a manual run asks for it; pull requests never.
 # dotnet push, not NuGetCommand@2, whose NuGet.exe needs mono, which newer Ubuntu images lack.
 - task: DotNetCoreCLI@2
   displayName: Push to the Public feed
-  condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'), or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['isTagBuild'], 'True')))
+  condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'), or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['isTagBuild'], 'True'), ${{ parameters.publishTestPackage }}))
   inputs:
     command: push
     packagesToPush: '$(Build.ArtifactStagingDirectory)/**/*.nupkg;!$(Build.ArtifactStagingDirectory)/**/*.symbols.nupkg'
