@@ -12,12 +12,18 @@ RUN dotnet restore src/Dbosoft.ConfigService.Host/Dbosoft.ConfigService.Host.csp
 
 # Build and publish
 COPY src/ src/
+ARG VERSION=0.0.0-local
 RUN dotnet publish src/Dbosoft.ConfigService.Host/Dbosoft.ConfigService.Host.csproj \
     -c Release \
     -o /app/publish \
-    --no-restore
+    --no-restore \
+    -p:Version=${VERSION}
 
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION} AS runtime
+LABEL org.opencontainers.image.title="dbosoft Config Service" \
+      org.opencontainers.image.vendor="dbosoft" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.source="https://github.com/dbosoft/config-service"
 WORKDIR /app
 
 # Data directory mounted as a volume so values, credentials, and audit log
